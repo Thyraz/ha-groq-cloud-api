@@ -1,7 +1,7 @@
 {
   "domain": "groq_cloud_api",
   "name": "Groq Cloud API",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "codeowners": [
     "@HunorLaczko"
   ],
@@ -12,7 +12,7 @@
   "homekit": {},
   "iot_class": "cloud_push",
   "requirements": [
-    "groq==0.9.0"
+    "groq==0.18.0"
   ],
   "ssdp": [],
   "zeroconf": []
