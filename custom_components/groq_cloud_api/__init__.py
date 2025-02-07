@@ -6,6 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_API_KEY, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.httpx_client import get_async_client
 
 from .const import LOGGER
 
@@ -19,7 +20,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: GroqConfigEntry) -> bool
 
     LOGGER.info("Setting up %s", entry)
 
-    client = groq.AsyncGroq(api_key=entry.data[CONF_API_KEY])
+    client = groq.AsyncGroq(
+        api_key=entry.data[CONF_API_KEY],
+        http_client=get_async_client(hass)
+    )
 
     # TODO: I get async errors when trying to call the list function. But this would be the proper way to validate the API key.
     # try:
