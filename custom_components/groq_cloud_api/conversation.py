@@ -186,7 +186,7 @@ class GroqConversationEntity(
         try:
             prompt_parts = [
                 template.Template(
-                    llm.BASE_PROMPT
+                    llm.DATE_TIME_PROMPT
                     + options.get(CONF_PROMPT, llm.DEFAULT_INSTRUCTIONS_PROMPT),
                     self.hass,
                 ).async_render(
