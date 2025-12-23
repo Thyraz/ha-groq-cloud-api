@@ -1,5 +1,7 @@
 """Conversation support for Groq Cloud."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 import json
 from typing import Any, Literal
@@ -32,7 +34,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_LLM_HASS_API, MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, intent, llm
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.json import json_dumps
 
 from . import GroqConfigEntry
@@ -57,7 +59,7 @@ MAX_TOOL_ITERATIONS = 10
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: GroqConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up conversation entities."""
     agent = GroqConversationEntity(config_entry)
@@ -198,12 +200,10 @@ class GroqConversationEntity(
 
         try:
             await chat_log.async_provide_llm_data(
-                llm_context=user_input.as_llm_context(DOMAIN),
-                user_llm_hass_api=options.get(CONF_LLM_HASS_API),
-                user_llm_prompt=options.get(
-                    CONF_PROMPT, llm.DEFAULT_INSTRUCTIONS_PROMPT
-                ),
-                user_extra_system_prompt=user_input.extra_system_prompt,
+                user_input.as_llm_context(DOMAIN),
+                options.get(CONF_LLM_HASS_API),
+                options.get(CONF_PROMPT),
+                user_input.extra_system_prompt,
             )
         except ConverseError as err:
             return err.as_conversation_result()
