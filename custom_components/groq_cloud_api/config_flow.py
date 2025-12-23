@@ -26,6 +26,7 @@ from homeassistant.helpers.selector import (
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
+    SelectSelectorMode,
     TemplateSelector,
 )
 
@@ -33,15 +34,14 @@ from .const import (
     CONF_CHAT_MODEL,
     CONF_MAX_TOKENS,
     CONF_PROMPT,
-    CONF_RECOMMENDED,
     CONF_TEMPERATURE,
     CONF_TOP_P,
     DEFAULT_NAME,
+    DEFAULT_OPTIONS,
     DOMAIN,
     LOGGER,
     RECOMMENDED_CHAT_MODEL,
     RECOMMENDED_MAX_TOKENS,
-    RECOMMENDED_OPTIONS,
     RECOMMENDED_TEMPERATURE,
     RECOMMENDED_TOP_P,
 )
@@ -53,8 +53,41 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
-    """Validate the user input allows us to connect."""
+async def async_fetch_models(api_key: str) -> list[str]:
+    """Fetch available models from Groq API."""
+    response = await asyncio.to_thread(
+        requests.get,
+        url="https://api.groq.com/openai/v1/models",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        timeout=10,
+    )
+
+    if response.status_code != 200:
+        LOGGER.warning(
+            "Failed to fetch models: %d - %s",
+            response.status_code,
+            response.reason,
+        )
+        return []
+
+    models = response.json().get("data", [])
+    # Filter to only include models that support chat completions
+    # and sort alphabetically
+    model_ids = sorted([
+        model.get("id")
+        for model in models
+        if model.get("id")
+    ])
+
+    LOGGER.debug("Available models: %s", model_ids)
+    return model_ids
+
+
+async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> list[str]:
+    """Validate the user input and return available models."""
     response = await asyncio.to_thread(
         requests.get,
         url="https://api.groq.com/openai/v1/models",
@@ -81,12 +114,16 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
     if response.status_code != 200:
         raise UnknownError
 
+    # Return list of available models
+    models = response.json().get("data", [])
+    return sorted([model.get("id") for model in models if model.get("id")])
+
 
 class GroqConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle UI config flow for Groq Cloud API."""
 
     VERSION = 1
-    MINOR_VERSION = 1
+    MINOR_VERSION = 2
 
     async def async_step_user(
         self,
@@ -119,7 +156,7 @@ class GroqConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(
                 title=DEFAULT_NAME,
                 data=user_input,
-                options=RECOMMENDED_OPTIONS,
+                options=DEFAULT_OPTIONS,
             )
 
         return self.async_show_form(
@@ -141,102 +178,104 @@ class GroqConfigFlow(ConfigFlow, domain=DOMAIN):
 class GroqOptionsFlow(OptionsFlow):
     """Groq Cloud API options flow handler."""
 
-    last_rendered_recommended: bool = False
-
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the options."""
+        if user_input is not None:
+            if not user_input.get(CONF_LLM_HASS_API):
+                user_input.pop(CONF_LLM_HASS_API, None)
+            return self.async_create_entry(title="", data=user_input)
+
+        # Fetch available models from API
+        api_key = self.config_entry.data.get(CONF_API_KEY)
+        available_models = await async_fetch_models(api_key)
+
         options: dict[str, Any] | MappingProxyType[str, Any] = (
             self.config_entry.options
         )
 
-        if user_input is None:
-            self.last_rendered_recommended = options.get(CONF_RECOMMENDED, False)
-
-        if user_input is not None:
-            if user_input[CONF_RECOMMENDED] == self.last_rendered_recommended:
-                if not user_input.get(CONF_LLM_HASS_API):
-                    user_input.pop(CONF_LLM_HASS_API, None)
-                return self.async_create_entry(title="", data=user_input)
-
-            # Re-render the options again, now with the recommended options shown/hidden
-            self.last_rendered_recommended = user_input[CONF_RECOMMENDED]
-
-            options = {
-                CONF_RECOMMENDED: user_input[CONF_RECOMMENDED],
-                CONF_PROMPT: user_input.get(
-                    CONF_PROMPT, llm.DEFAULT_INSTRUCTIONS_PROMPT
-                ),
-                CONF_LLM_HASS_API: user_input.get(CONF_LLM_HASS_API),
-            }
-
-        schema = groq_config_option_schema(self.hass, options)
+        schema = await self._build_options_schema(options, available_models)
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(schema),
         )
 
+    async def _build_options_schema(
+        self,
+        options: dict[str, Any] | MappingProxyType[str, Any],
+        available_models: list[str],
+    ) -> dict:
+        """Build the options schema with model dropdown."""
+        hass_apis: list[SelectOptionDict] = [
+            SelectOptionDict(
+                label=api.name,
+                value=api.id,
+            )
+            for api in llm.async_get_apis(self.hass)
+        ]
 
-def groq_config_option_schema(
-    hass: HomeAssistant,
-    options: dict[str, Any] | MappingProxyType[str, Any],
-) -> dict:
-    """Return a schema for Groq Cloud completion options."""
-    hass_apis: list[SelectOptionDict] = [
-        SelectOptionDict(
-            label=api.name,
-            value=api.id,
-        )
-        for api in llm.async_get_apis(hass)
-    ]
+        # Determine the current/default model
+        current_model = options.get(CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL)
 
-    schema: dict = {
-        vol.Optional(
-            CONF_PROMPT,
-            description={
-                "suggested_value": options.get(
-                    CONF_PROMPT, llm.DEFAULT_INSTRUCTIONS_PROMPT
+        # If current model is not in available models, use first available
+        if available_models and current_model not in available_models:
+            LOGGER.warning(
+                "Configured model '%s' not available, defaulting to '%s'",
+                current_model,
+                available_models[0],
+            )
+            current_model = available_models[0]
+
+        # Build model options for dropdown
+        model_options: list[SelectOptionDict] = [
+            SelectOptionDict(label=model, value=model)
+            for model in available_models
+        ]
+
+        # If no models available, fall back to text input
+        if not model_options:
+            model_selector: Any = str
+        else:
+            model_selector = SelectSelector(
+                SelectSelectorConfig(
+                    options=model_options,
+                    mode=SelectSelectorMode.DROPDOWN,
                 )
-            },
-        ): TemplateSelector(),
-        vol.Optional(
-            CONF_LLM_HASS_API,
-            description={"suggested_value": options.get(CONF_LLM_HASS_API)},
-        ): SelectSelector(SelectSelectorConfig(options=hass_apis)),
-        vol.Required(
-            CONF_RECOMMENDED, default=options.get(CONF_RECOMMENDED, False)
-        ): bool,
-    }
+            )
 
-    if options.get(CONF_RECOMMENDED):
-        return schema
-
-    schema.update(
-        {
+        schema: dict = {
             vol.Optional(
+                CONF_PROMPT,
+                description={
+                    "suggested_value": options.get(
+                        CONF_PROMPT, llm.DEFAULT_INSTRUCTIONS_PROMPT
+                    )
+                },
+            ): TemplateSelector(),
+            vol.Optional(
+                CONF_LLM_HASS_API,
+                description={"suggested_value": options.get(CONF_LLM_HASS_API)},
+            ): SelectSelector(SelectSelectorConfig(options=hass_apis)),
+            vol.Required(
                 CONF_CHAT_MODEL,
-                description={"suggested_value": options.get(CONF_CHAT_MODEL)},
-                default=RECOMMENDED_CHAT_MODEL,
-            ): str,
-            vol.Optional(
+                default=current_model,
+            ): model_selector,
+            vol.Required(
                 CONF_MAX_TOKENS,
-                description={"suggested_value": options.get(CONF_MAX_TOKENS)},
-                default=RECOMMENDED_MAX_TOKENS,
+                default=options.get(CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS),
             ): int,
-            vol.Optional(
+            vol.Required(
                 CONF_TOP_P,
-                description={"suggested_value": options.get(CONF_TOP_P)},
-                default=RECOMMENDED_TOP_P,
+                default=options.get(CONF_TOP_P, RECOMMENDED_TOP_P),
             ): NumberSelector(NumberSelectorConfig(min=0, max=1, step=0.05)),
-            vol.Optional(
+            vol.Required(
                 CONF_TEMPERATURE,
-                description={"suggested_value": options.get(CONF_TEMPERATURE)},
-                default=RECOMMENDED_TEMPERATURE,
+                default=options.get(CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE),
             ): NumberSelector(NumberSelectorConfig(min=0, max=2, step=0.05)),
         }
-    )
-    return schema
+
+        return schema
 
 
 class UnknownError(HomeAssistantError):
