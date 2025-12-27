@@ -42,6 +42,7 @@ from .const import (
     CONF_CHAT_MODEL,
     CONF_MAX_TOKENS,
     CONF_PROMPT,
+    CONF_REASONING_EFFORT,
     CONF_TEMPERATURE,
     CONF_TOP_P,
     DOMAIN,
@@ -229,15 +230,33 @@ class GroqConversationEntity(
         # To prevent infinite loops, we limit the number of iterations
         for _iteration in range(MAX_TOOL_ITERATIONS):
             try:
-                result = await client.chat.completions.create(
-                    model=options.get(CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL),
-                    messages=messages,
-                    tools=tools or NOT_GIVEN,
-                    max_tokens=options.get(CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS),
-                    top_p=options.get(CONF_TOP_P, RECOMMENDED_TOP_P),
-                    temperature=options.get(CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE),
-                    user=chat_log.conversation_id,
-                )
+                model = options.get(CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL)
+                model_kwargs: dict[str, Any] = {
+                    "model": model,
+                    "messages": messages,
+                    "tools": tools or NOT_GIVEN,
+                    "max_tokens": options.get(CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS),
+                    "top_p": options.get(CONF_TOP_P, RECOMMENDED_TOP_P),
+                    "temperature": options.get(CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE),
+                    "user": chat_log.conversation_id,
+                }
+
+                reasoning_effort = options.get(CONF_REASONING_EFFORT)
+                if model.startswith("qwen/qwen3-32b"):
+                    model_kwargs["reasoning_format"] = "hidden"
+                    model_kwargs["reasoning_effort"] = reasoning_effort or "default"
+                elif model.startswith(
+                    (
+                        "openai/gpt-oss-20b",
+                        "openai/gpt-oss-120b",
+                        "openai/gpt-oss-safeguard-20b",
+                    )
+                ):
+                    model_kwargs["include_reasoning"] = False
+                    if reasoning_effort:
+                        model_kwargs["reasoning_effort"] = reasoning_effort
+
+                result = await client.chat.completions.create(**model_kwargs)
             except groq.GroqError as err:
                 intent_response = intent.IntentResponse(language=user_input.language)
                 intent_response.async_set_error(

@@ -14,6 +14,7 @@ DEFAULT_CONVERSATION_NAME = "Groq Conversation"
 CONF_PROMPT = "prompt"
 CONF_CHAT_MODEL = "chat_model"
 RECOMMENDED_CHAT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+CONF_REASONING_EFFORT = "reasoning_effort"
 CONF_MAX_TOKENS = "max_tokens"
 RECOMMENDED_MAX_TOKENS = 300
 CONF_TOP_P = "top_p"
