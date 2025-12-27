@@ -21,6 +21,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import llm
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     SelectOptionDict,
@@ -28,6 +29,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
     TemplateSelector,
+    TextSelector,
 )
 
 from .const import (
@@ -35,12 +37,15 @@ from .const import (
     CONF_MAX_TOKENS,
     CONF_PROMPT,
     CONF_REASONING_EFFORT,
+    CONF_SUPPORTS_REASONING,
     CONF_TEMPERATURE,
     CONF_TOP_P,
     DEFAULT_NAME,
     DEFAULT_OPTIONS,
     DOMAIN,
+    GPT_OSS_REASONING_OPTIONS,
     LOGGER,
+    QWEN_REASONING_OPTIONS,
     RECOMMENDED_CHAT_MODEL,
     RECOMMENDED_MAX_TOKENS,
     RECOMMENDED_TEMPERATURE,
@@ -186,6 +191,10 @@ class GroqOptionsFlow(OptionsFlow):
         if user_input is not None:
             if not user_input.get(CONF_LLM_HASS_API):
                 user_input.pop(CONF_LLM_HASS_API, None)
+            # Remove reasoning_effort if supports_reasoning is not checked
+            if not user_input.get(CONF_SUPPORTS_REASONING):
+                user_input.pop(CONF_REASONING_EFFORT, None)
+                user_input.pop(CONF_SUPPORTS_REASONING, None)
             return self.async_create_entry(title="", data=user_input)
 
         # Fetch available models from API
@@ -245,6 +254,36 @@ class GroqOptionsFlow(OptionsFlow):
                 )
             )
 
+        # Determine reasoning options based on model
+        supports_reasoning = options.get(CONF_SUPPORTS_REASONING, False)
+        reasoning_options: list[str] | None = None
+        if current_model.startswith("qwen/qwen3-32b"):
+            reasoning_options = QWEN_REASONING_OPTIONS
+        elif current_model.startswith(
+            (
+                "openai/gpt-oss-20b",
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-safeguard-20b",
+            )
+        ):
+            reasoning_options = GPT_OSS_REASONING_OPTIONS
+
+        # Determine reasoning effort selector
+        if reasoning_options:
+            selected_reasoning = options.get(CONF_REASONING_EFFORT)
+            if selected_reasoning not in reasoning_options:
+                selected_reasoning = reasoning_options[0]
+            reasoning_selector: Any = SelectSelector(
+                SelectSelectorConfig(
+                    options=reasoning_options,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
+            reasoning_default = selected_reasoning
+        else:
+            reasoning_selector = TextSelector()
+            reasoning_default = options.get(CONF_REASONING_EFFORT, "")
+
         schema: dict = {
             vol.Optional(
                 CONF_PROMPT,
@@ -274,39 +313,19 @@ class GroqOptionsFlow(OptionsFlow):
                 CONF_TEMPERATURE,
                 default=options.get(CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE),
             ): NumberSelector(NumberSelectorConfig(min=0, max=2, step=0.05)),
+            vol.Optional(
+                CONF_SUPPORTS_REASONING,
+                default=supports_reasoning,
+            ): BooleanSelector(),
         }
 
-        reasoning_options: list[str] | None = None
-        if current_model.startswith("qwen/qwen3-32b"):
-            reasoning_options = ["default", "none"]
-        elif current_model.startswith(
-            (
-                "openai/gpt-oss-20b",
-                "openai/gpt-oss-120b",
-                "openai/gpt-oss-safeguard-20b",
-            )
-        ):
-            reasoning_options = ["low", "medium", "high"]
-
-        if reasoning_options:
-            selected_reasoning = options.get(CONF_REASONING_EFFORT)
-            if selected_reasoning not in reasoning_options:
-                selected_reasoning = reasoning_options[0]
-            schema[
-                vol.Optional(
-                    CONF_REASONING_EFFORT,
-                    description={"suggested_value": options.get(CONF_REASONING_EFFORT)},
-                    default=selected_reasoning,
-                )
-            ] = SelectSelector(
-                SelectSelectorConfig(
-                    options=reasoning_options,
-                    mode=SelectSelectorMode.DROPDOWN,
-                )
-            )
-        elif CONF_REASONING_EFFORT in options:
-            options = dict(options)
-            options.pop(CONF_REASONING_EFFORT, None)
+        # Only show reasoning effort field if checkbox is checked
+        if supports_reasoning:
+            schema[vol.Optional(
+                CONF_REASONING_EFFORT,
+                description={"suggested_value": options.get(CONF_REASONING_EFFORT)},
+                default=reasoning_default,
+            )] = reasoning_selector
 
         return schema
 

@@ -42,6 +42,18 @@ For the options check out the OpenAI Conversation integration [here](https://www
 
 For the available models check out [Groq Cloud](https://console.groq.com/docs/models).
 
+### Reasoning Effort 🧠
+
+Some models support a "reasoning effort" parameter that controls how much computation the model uses for reasoning tasks. To enable this:
+
+1. Check the **"Model supports reasoning effort"** toggle in the integration options. (Make sure you only turn it on for models that support it, otherwise the API will return an error)
+2. Submit, then open the configuration again. A reasoning effort field will appear:
+   - For **Qwen models** (e.g., `qwen/qwen3-32b`): A dropdown with options `default` or `none`
+   - For **GPT-OSS models** (e.g., `openai/gpt-oss-20b`, `openai/gpt-oss-120b`): A dropdown with options `low`, `medium`, or `high`
+   - For **other models**: A text field where you can enter a custom value
+
+If the toggle is not enabled, no reasoning effort parameter will be sent to the API.
+
 ### Home Assistant Dashboard 💻
 
 - Configure the integration by **clicking here** ⤵️

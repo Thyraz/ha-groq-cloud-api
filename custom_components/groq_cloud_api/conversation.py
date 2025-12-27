@@ -43,6 +43,7 @@ from .const import (
     CONF_MAX_TOKENS,
     CONF_PROMPT,
     CONF_REASONING_EFFORT,
+    CONF_SUPPORTS_REASONING,
     CONF_TEMPERATURE,
     CONF_TOP_P,
     DOMAIN,
@@ -241,19 +242,24 @@ class GroqConversationEntity(
                     "user": chat_log.conversation_id,
                 }
 
-                reasoning_effort = options.get(CONF_REASONING_EFFORT)
-                if model.startswith("qwen/qwen3-32b"):
-                    model_kwargs["reasoning_format"] = "hidden"
-                    model_kwargs["reasoning_effort"] = reasoning_effort or "default"
-                elif model.startswith(
-                    (
-                        "openai/gpt-oss-20b",
-                        "openai/gpt-oss-120b",
-                        "openai/gpt-oss-safeguard-20b",
-                    )
-                ):
-                    model_kwargs["include_reasoning"] = False
-                    if reasoning_effort:
+                # Only add reasoning parameters if supports_reasoning is enabled
+                if options.get(CONF_SUPPORTS_REASONING):
+                    reasoning_effort = options.get(CONF_REASONING_EFFORT)
+                    if model.startswith("qwen/qwen3-32b"):
+                        model_kwargs["reasoning_format"] = "hidden"
+                        model_kwargs["reasoning_effort"] = reasoning_effort or "default"
+                    elif model.startswith(
+                        (
+                            "openai/gpt-oss-20b",
+                            "openai/gpt-oss-120b",
+                            "openai/gpt-oss-safeguard-20b",
+                        )
+                    ):
+                        model_kwargs["include_reasoning"] = False
+                        if reasoning_effort:
+                            model_kwargs["reasoning_effort"] = reasoning_effort
+                    elif reasoning_effort:
+                        # For other models, just pass reasoning_effort if provided
                         model_kwargs["reasoning_effort"] = reasoning_effort
 
                 result = await client.chat.completions.create(**model_kwargs)
