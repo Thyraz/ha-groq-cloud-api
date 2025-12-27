@@ -34,6 +34,7 @@ from .const import (
     CONF_CHAT_MODEL,
     CONF_MAX_TOKENS,
     CONF_PROMPT,
+    CONF_REASONING_EFFORT,
     CONF_TEMPERATURE,
     CONF_TOP_P,
     DEFAULT_NAME,
@@ -274,6 +275,38 @@ class GroqOptionsFlow(OptionsFlow):
                 default=options.get(CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE),
             ): NumberSelector(NumberSelectorConfig(min=0, max=2, step=0.05)),
         }
+
+        reasoning_options: list[str] | None = None
+        if current_model.startswith("qwen/qwen3-32b"):
+            reasoning_options = ["default", "none"]
+        elif current_model.startswith(
+            (
+                "openai/gpt-oss-20b",
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-safeguard-20b",
+            )
+        ):
+            reasoning_options = ["low", "medium", "high"]
+
+        if reasoning_options:
+            selected_reasoning = options.get(CONF_REASONING_EFFORT)
+            if selected_reasoning not in reasoning_options:
+                selected_reasoning = reasoning_options[0]
+            schema[
+                vol.Optional(
+                    CONF_REASONING_EFFORT,
+                    description={"suggested_value": options.get(CONF_REASONING_EFFORT)},
+                    default=selected_reasoning,
+                )
+            ] = SelectSelector(
+                SelectSelectorConfig(
+                    options=reasoning_options,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
+        elif CONF_REASONING_EFFORT in options:
+            options = dict(options)
+            options.pop(CONF_REASONING_EFFORT, None)
 
         return schema
 
